@@ -4,8 +4,6 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
-
-# KONFİQURASİYA - TOKEN mühit dəyişənindən oxunur (Railway-də təhlükəsiz)
 TOKEN = os.environ.get("BOT_TOKEN", "8601872497:AAGpW9QFiogUjQzrr_jSdWTMixgOgS5fL9Y")
 OUTPUT_FOLDER = "output"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -25,33 +23,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'images' not in context.user_data:
         context.user_data['images'] = []
-    
+
     msg = await update.message.reply_text("⏳ Şəkil emal edilir, zəhmət olmasa gözləyin...")
-    
+
     try:
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
         img_bytearray = await file.download_as_bytearray()
-    
-    # Arxa fonun silinməsi (ağ fon üçün)
-product_img = Image.open(io.BytesIO(img_bytearray)).convert("RGBA")
-data = product_img.getdata()
-new_data = []
-for item in data:
-    r, g, b, a = item
-    if r > 200 and g > 200 and b > 200:
-        new_data.append((255, 255, 255, 0))
-    else:
-        new_data.append(item)
-product_img.putdata(new_data)
-        
+
+        # Arxa fonun silinməsi (ağ fon üçün)
+        product_img = Image.open(io.BytesIO(img_bytearray)).convert("RGBA")
+        data = product_img.getdata()
+        new_data = []
+        for item in data:
+            r, g, b, a = item
+            if r > 200 and g > 200 and b > 200:
+                new_data.append((255, 255, 255, 0))
+            else:
+                new_data.append(item)
+        product_img.putdata(new_data)
+
         # Boşluqların kəsilməsi (crop)
         bbox = product_img.getbbox()
-        if bbox: product_img = product_img.crop(bbox)
-        
+        if bbox:
+            product_img = product_img.crop(bbox)
+
         context.user_data['images'].append(product_img)
-        
-        # Avtomatik doldurma şablonu
+
         shablon = (
             "Məhsul adi: \n"
             "istifade sahesi: \n"
@@ -61,7 +59,7 @@ product_img.putdata(new_data)
 
         keyboard = [["✅ Kataloqu hazırla"]]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        
+
         await msg.delete()
         await update.message.reply_text(
             f"📥 {len(context.user_data['images'])}-ci şəkil qəbul edildi.\n\n"
@@ -97,12 +95,11 @@ async def build_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             template = Image.new("RGBA", (1200, 1200), "white")
         else:
             template = Image.open("template.png").convert("RGBA")
-        
+
         T_W, T_H = template.size
         draw = ImageDraw.Draw(template)
-        
+
         try:
-            # Linux/Railway-də mövcud olan şrift
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             if not os.path.exists(font_path):
                 font_path = "arialbd.ttf"
@@ -119,16 +116,16 @@ async def build_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             img = images[0]
             w_percent = (target_h / float(img.size[1]))
             w_size = int((float(img.size[0]) * float(w_percent)))
-            
+
             img_resized = enhance_image_quality(img.resize((w_size, target_h), Image.Resampling.LANCZOS))
-            
+
             x_pos = int((T_W * 0.30) - (img_resized.size[0] / 2))
             template.paste(img_resized, (x_pos, y_pos), img_resized)
-            
+
             info_text = context.user_data.get('text_info', "Məlumat daxil edilməyib.")
             text_x = int(T_W * 0.55)
             text_y = y_pos + 50
-            
+
             draw.text((text_x, text_y), "MƏHSUL HAQQINDA:", fill="black", font=font_bold)
             draw.text((text_x, text_y + 70), info_text, fill="#333333", font=font_desc)
 
@@ -137,7 +134,7 @@ async def build_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, img in enumerate(images):
                 w_percent = (target_h / float(img.size[1]))
                 w_size = int((float(img.size[0]) * float(w_percent)))
-                
+
                 max_col_w = T_W / num
                 if w_size > max_col_w * 0.8:
                     w_size = int(max_col_w * 0.8)
@@ -152,11 +149,11 @@ async def build_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         output_path = f"{OUTPUT_FOLDER}/final_{update.message.chat_id}.png"
         template.save(output_path)
-        
+
         with open(output_path, 'rb') as f:
             await update.message.reply_photo(
-                photo=f, 
-                caption="✅ Kataloqunuz hazırdır!", 
+                photo=f,
+                caption="✅ Kataloqunuz hazırdır!",
                 reply_markup=ReplyKeyboardRemove()
             )
 
@@ -168,10 +165,10 @@ async def build_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
-    
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-    
+
     print("Bot işə düşdü...")
     app.run_polling()
