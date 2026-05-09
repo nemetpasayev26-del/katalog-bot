@@ -65,71 +65,150 @@ def remove_background(img_bytes: bytes):
 def enhance_image_quality(img):
     return ImageEnhance.Sharpness(img).enhance(1.5)
 
+import os
+import io
+import requests
+import google.generativeai as genai
+import logging
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+
+# ... (Kodu digər hissələri: logging, API keys, AI funksiyaları eyni qalır) ...
+
+# ==============================================================================
+# --- TƏKMİLLƏŞDİRİLMİŞ FUNKSİYA: build_catalog_image ---
+# ==============================================================================
 def build_catalog_image(images, texts, category, page_num):
+    """
+    Hazır 'template.png' şablonunu yükləyir, şəkilləri avtomatik nizamlayıb
+    bosluqlara mərkəzə yerləşdirir və mətnləri yazır.
+    """
     logger.info("build_catalog_image başladı...")
     template_path = "template.png"
     
+    # 1. Şablonu RGB rejimində yükləyirik
     if os.path.exists(template_path):
         canvas = Image.open(template_path).convert("RGB")
+        logger.info("template.png yükləndi.")
     else:
+        # Şablon tapılmasa, xəta verməmək üçün ağ fon yaradırıq (keçid variantı)
         canvas = Image.new("RGB", (1080, 1080), (255, 255, 255))
-        logger.error(f"XƏTA: '{template_path}' tapılmadı!")
+        logger.error(f"XƏTA: '{template_path}' tapılmadı! Ağ fon istifadə olunur.")
 
     W, H = canvas.size
     draw = ImageDraw.Draw(canvas)
 
+    # 2. Şriftləri yükləyirik (Sizin köhnə kodla eyni məntiq)
+    # Şrift yollarını öz sisteminizə uyğun tənzimləyin:
+    # Məs: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     try:
-        font_path = "arial.ttf" 
+        font_path = "arial.ttf"  # Sisteminizdəki Azərbaycan şrifti yolu (.ttf)
         font_title = ImageFont.truetype(font_path, 28) 
         font_bullet = ImageFont.truetype(font_path, 24) 
         font_footer = ImageFont.truetype(font_path, 28) 
-    except:
+    except Exception as e:
+        logger.error(f"Şrift yükləmə xətası: {e}. Standart şrift istifadə olunur.")
         font_title = font_bullet = font_footer = ImageFont.load_default()
 
-    # Başlıq və Səhifə nömrəsi
+    # --- Daimi Mətnlər (Köhnə kodla eyni) ---
+    white = (255, 255, 255)
+    
+    # Kateqoriya Başlığı (Mərkəzə, Göy başlıq zolağına)
     title_w = draw.textlength(category, font=font_title)
-    draw.text(((W - title_w) / 2, 10), category, fill="white", font=font_title)
+    draw.text(((W - title_w) / 2, 10), category, fill=white, font=font_title)
+
+    # Səhifə nömrəsi (Mərkəzə, Aşağı göy zolağa)
     footer_text = f"səhifə {page_num}"
     footer_w = draw.textlength(footer_text, font=font_footer)
-    draw.text(((W - footer_w) / 2, 955), footer_text, fill="white", font=font_footer)
+    draw.text(((W - footer_w) / 2, 955), footer_text, fill=white, font=font_footer)
 
-    # --- ŞƏKİLLƏRİN NİZAMLANMASI ---
+    # ==========================================================================
+    # --- ŞƏKİLLƏRİN YERLƏŞDİRİLMƏSİ (Dəyişdirilmiş hissə) ---
+    # ==========================================================================
+    
     num_products = len(images)
     col_width = W // num_products
-    AREA_TOP, AREA_BOTTOM = 70, 680 # Şəkil sahəsi
+    
+    # 3. Şablon üzərindəki məhsul şəkillərinin yerləşməli olduğu ağ boşluğun koordinatlarını təyin edirik
+    # template.png-də şəkillər yuxarı göy başlıqdan sonra və 
+    # aşağı mətn boşluğundan əvvəl yerləşməlidir.
+    AREA_TOP = 70      # Yuxarı göy zolaqdan sonra
+    AREA_BOTTOM = 680  # Aşağı mətn sahəsinə qədər
+    AREA_HEIGHT = AREA_BOTTOM - AREA_TOP
 
     for i, img in enumerate(images):
-        # Boşluğun ölçüləri
-        max_box_w, max_box_h = col_width - 80, (AREA_BOTTOM - AREA_TOP) - 40
+        logger.info(f"Məhsul {i+1} şəkli nizamlanır...")
         
-        # Mütənasib ölçüləndirmə (thumbnail nisbəti qoruyur)
-        img_copy = img.copy()
+        # 4. Hər bir məhsul üçün sütun daxilində ağ boşluğun (rectangle) ölçüsünü tapırığ
+        # Sütunun kənarlarından boşluq qoyuruq (padding), çərçivəyə yapışmasın.
+        padding_x = 40 
+        padding_y = 20
+        
+        # Boşluğun koordinatları (x1, y1, x2, y2)
+        box_x1 = col_width * i + padding_x
+        box_y1 = AREA_TOP + padding_y
+        box_x2 = col_width * (i + 1) - padding_x
+        box_y2 = AREA_BOTTOM - padding_y
+        
+        # Boşluğun daxili ölçüləri (bu ölçülərə sığışdırmalıyıq)
+        max_box_w = box_x2 - box_x1
+        max_box_h = box_y2 - box_y1
+        
+        orig_w, orig_h = img.size
+        
+        # 5. Şəklin ölçüsünü mütənasib şəkildə dəyişirik
+        # Pillow-nun thumbnail() funksiyası nisbəti qoruyur və şəkli sığışdırır.
+        
+        img_copy = img.copy() # Orijinal şəkli qorumaq üçün kopya edirik
         img_copy.thumbnail((max_box_w, max_box_h), Image.Resampling.LANCZOS)
-        new_w, new_h = img_copy.size
-
-        # Mərkəzə yerləşdirmə koordinatları
-        box_x1 = col_width * i
-        paste_x = box_x1 + (col_width - new_w) // 2
-        paste_y = AREA_TOP + ((AREA_BOTTOM - AREA_TOP) - new_h) // 2
         
+        # Nizamlanmış şəklin yeni ölçüləri
+        new_w, new_h = img_copy.size
+        logger.info(f"Orijinal: {orig_w}x{orig_h} -> Nizamlanmış: {new_w}x{new_h}")
+
+        # 6. Nizamlanmış şəkli boşluğun tam mərkəzinə düzmək üçün koordinatları hesablayırıq
+        # Şaquli və üfüqi mərkəz
+        paste_x = box_x1 + (max_box_w - new_w) // 2
+        paste_y = box_y1 + (max_box_h - new_h) // 2
+        
+        # Keyfiyyəti artırırıq (Sharpness)
         img_r = enhance_image_quality(img_copy)
+        
+        # 7. Şəkli şablonun üzərinə yapışdırırıq (alfa kanalı ilə şəffaflıq qorunur)
         canvas.paste(img_r, (paste_x, paste_y), img_r)
 
-    # --- MƏTNLRİN YAZILMASI ---
-    text_top, line_height = 700, 40
+    # ==========================================================================
+    # --- MƏTNLRİN YERLƏŞDİRİLMƏSİ (Köhnə kodla eyni) ---
+    # ==========================================================================
+    text_top = 700 
+    black = (0, 0, 0)
+    bullet = "• "
+    line_height = 40
+    
     for i, text in enumerate(texts):
-        x_start = col_width * i + 40
+        x_start = col_width * i + 40 
         current_y = text_top
-        for line in text.strip().split("\n"):
+        lines = text.strip().split("\n")
+        
+        for line in lines:
             line = line.strip()
             if not line: continue
-            draw.text((x_start, current_y), line, fill=(0,0,0), font=font_bullet)
+            if line.startswith("•"):
+                draw.text((x_start, current_y), bullet, fill=black, font=font_bullet)
+                draw.text((x_start + 20, current_y), line[1:].strip(), fill=black, font=font_bullet)
+            else:
+                draw.text((x_start, current_y), line, fill=black, font=font_bullet)
             current_y += line_height
 
+    # 8. Nəticəni qaytarırıq (RGB olaraq)
     output = io.BytesIO()
     canvas.save(output, format="PNG", quality=95)
     output.seek(0)
+    logger.info("build_catalog_image bitdi.")
     return output
+
+# ... (start, handle_photo, handle_text, next_photo_or_build eyni qalır) ...
 
 # ==============================================================================
 # --- GÜCLƏNDİRİLMİŞ handle_photo funksiyası ---
