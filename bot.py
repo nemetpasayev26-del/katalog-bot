@@ -4,7 +4,6 @@ import requests
 import google.generativeai as genai
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
-
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
@@ -56,106 +55,124 @@ def enhance_image_quality(img):
 
 def build_catalog_image(images, texts, category, page_num):
     W, H = 1200, 1200
-    canvas = Image.new("RGBA", (W, H), (245, 248, 252, 255))
+    canvas = Image.new("RGBA", (W, H), (255, 255, 255, 255))
     draw = ImageDraw.Draw(canvas)
 
     try:
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         font_reg_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        font_title = ImageFont.truetype(font_path, 52)
-        font_header = ImageFont.truetype(font_path, 30)
-        font_text = ImageFont.truetype(font_reg_path, 28)
-        font_footer = ImageFont.truetype(font_path, 44)
-        font_watermark = ImageFont.truetype(font_path, 90)
+        font_title = ImageFont.truetype(font_path, 56)
+        font_bullet_key = ImageFont.truetype(font_path, 32)
+        font_bullet_val = ImageFont.truetype(font_reg_path, 32)
+        font_footer = ImageFont.truetype(font_path, 48)
+        font_watermark = ImageFont.truetype(font_path, 110)
     except:
-        font_title = font_header = font_text = font_footer = font_watermark = ImageFont.load_default()
+        font_title = font_bullet_key = font_bullet_val = font_footer = font_watermark = ImageFont.load_default()
 
     # Yuxarı başlıq
-    draw.rectangle([(0, 0), (W, 85)], fill=(30, 60, 114))
+    draw.rectangle([(0, 0), (W, 90)], fill=(30, 60, 114))
     title_bbox = draw.textbbox((0, 0), category, font=font_title)
     title_w = title_bbox[2] - title_bbox[0]
-    draw.text(((W - title_w) / 2, 18), category, fill="white", font=font_title)
+    title_h = title_bbox[3] - title_bbox[1]
+    draw.text(((W - title_w) / 2, (90 - title_h) / 2), category, fill="white", font=font_title)
 
-    # Watermark
+    # Watermark (ortada şəffaf)
     wm_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
     wm_bbox = wm_draw.textbbox((0, 0), WATERMARK_TEXT, font=font_watermark)
     wm_w = wm_bbox[2] - wm_bbox[0]
     wm_h = wm_bbox[3] - wm_bbox[1]
-    wm_draw.text(((W - wm_w) / 2, (H - wm_h) / 2 - 60), WATERMARK_TEXT,
-                 fill=(180, 200, 230, 55), font=font_watermark)
+    wm_draw.text(((W - wm_w) / 2, (H - wm_h) / 2 - 50), WATERMARK_TEXT,
+                 fill=(180, 200, 230, 45), font=font_watermark)
     canvas = Image.alpha_composite(canvas, wm_layer)
     draw = ImageDraw.Draw(canvas)
 
-    # Şəkillər
     num = len(images)
-    img_area_top = 95
-    img_area_bottom = 620
-    img_h = img_area_bottom - img_area_top
     col_w = W // num
 
+    # Şəkil sahəsi
+    img_top = 100
+    img_bottom = 650
+    img_area_h = img_bottom - img_top
+
+    # Sütunlar arası ayırıcı xətlər
+    for i in range(1, num):
+        sep_x = col_w * i
+        draw.rectangle([(sep_x - 2, 90), (sep_x + 2, 1110)], fill=(200, 215, 235))
+
+    # Şəkil və mətn arasında ayırıcı
+    draw.rectangle([(0, img_bottom), (W, img_bottom + 4)], fill=(30, 60, 114))
+
+    # Footer
+    footer_top = 1110
+    draw.rectangle([(0, footer_top), (W, H)], fill=(30, 60, 114))
+    footer_text = f"səhifə {page_num}"
+    ft_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
+    ft_w = ft_bbox[2] - ft_bbox[0]
+    ft_h = ft_bbox[3] - ft_bbox[1]
+    draw.text(((W - ft_w) / 2, footer_top + (H - footer_top - ft_h) / 2),
+              footer_text, fill="white", font=font_footer)
+
+    # Şəkilləri yerləşdir
     for i, img in enumerate(images):
-        ratio = img_h / img.size[1]
-        new_w = int(img.size[0] * ratio)
-        if new_w > col_w - 20:
-            new_w = col_w - 20
-            ratio = new_w / img.size[0]
-        new_h = int(img.size[1] * ratio)
+        max_w = col_w - 40
+        max_h = img_area_h - 20
+        orig_w, orig_h = img.size
+        ratio = min(max_w / orig_w, max_h / orig_h)
+        new_w = int(orig_w * ratio)
+        new_h = int(orig_h * ratio)
         img_r = enhance_image_quality(img.resize((new_w, new_h), Image.Resampling.LANCZOS))
         x = col_w * i + (col_w - new_w) // 2
-        y = img_area_top + (img_h - new_h) // 2
+        y = img_top + (img_area_h - new_h) // 2
         canvas.paste(img_r, (x, y), img_r)
 
-    # Ayırıcı xətt
-    draw.rectangle([(0, 625), (W, 630)], fill=(200, 210, 225))
-
-    # Mətn hissəsi
-    col_w_text = W // num
-    text_top = 645
+    # Mətnləri yerləşdir
+    text_top = img_bottom + 20
+    text_bottom = footer_top - 10
 
     for i, text in enumerate(texts):
-        x_start = col_w_text * i + 30
+        x_start = col_w * i + 25
         y = text_top
         lines = text.strip().split("\n")
+
         for line in lines:
             line = line.strip()
-            if not line:
+            if not line or y >= text_bottom - 40:
                 continue
+
             if line.startswith("•"):
                 parts = line[1:].strip().split(":", 1)
                 if len(parts) == 2:
                     key = "• " + parts[0].strip() + ":"
                     val = parts[1].strip()
-                    draw.text((x_start, y), key, fill=(20, 40, 80), font=font_header)
-                    y += 36
+
+                    draw.text((x_start, y), key, fill=(20, 40, 100), font=font_bullet_key)
+                    y += 42
+
+                    max_text_w = col_w - 55
                     words = val.split()
                     line_text = ""
                     for word in words:
                         test = line_text + " " + word if line_text else word
-                        bbox = draw.textbbox((0, 0), test, font=font_text)
-                        if bbox[2] - bbox[0] < col_w_text - 60:
+                        bbox = draw.textbbox((0, 0), test, font=font_bullet_val)
+                        if bbox[2] - bbox[0] <= max_text_w:
                             line_text = test
                         else:
-                            draw.text((x_start + 20, y), line_text, fill=(50, 50, 50), font=font_text)
-                            y += 32
+                            if y < text_bottom - 40:
+                                draw.text((x_start + 20, y), line_text,
+                                          fill=(60, 60, 60), font=font_bullet_val)
+                                y += 36
                             line_text = word
-                    if line_text:
-                        draw.text((x_start + 20, y), line_text, fill=(50, 50, 50), font=font_text)
-                        y += 38
+                    if line_text and y < text_bottom - 40:
+                        draw.text((x_start + 20, y), line_text,
+                                  fill=(60, 60, 60), font=font_bullet_val)
+                        y += 46
                 else:
-                    draw.text((x_start, y), line, fill=(50, 50, 50), font=font_text)
-                    y += 38
-
-        if i < num - 1:
-            sep_x = col_w_text * (i + 1)
-            draw.rectangle([(sep_x - 1, 630), (sep_x + 1, 1110)], fill=(200, 210, 225))
-
-    # Footer
-    draw.rectangle([(0, 1115), (W, H)], fill=(30, 60, 114))
-    footer_text = f"səhifə {page_num}"
-    ft_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
-    ft_w = ft_bbox[2] - ft_bbox[0]
-    draw.text(((W - ft_w) / 2, 1128), footer_text, fill="white", font=font_footer)
+                    draw.text((x_start, y), line, fill=(60, 60, 60), font=font_bullet_val)
+                    y += 46
+            else:
+                draw.text((x_start, y), line, fill=(60, 60, 60), font=font_bullet_val)
+                y += 46
 
     output = io.BytesIO()
     canvas.convert("RGB").save(output, format="PNG", quality=95)
@@ -232,7 +249,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove()
             )
         else:
-            # AI mətnini redaktə edib göndərdi
             context.user_data['texts'].append(text)
             await next_photo_or_build(update, context)
 
