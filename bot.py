@@ -3,7 +3,7 @@ import io
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
-from rembg import remove
+
 
 # KONFİQURASİYA - TOKEN mühit dəyişənindən oxunur (Railway-də təhlükəsiz)
 TOKEN = os.environ.get("BOT_TOKEN", "8601872497:AAGpW9QFiogUjQzrr_jSdWTMixgOgS5fL9Y")
@@ -32,10 +32,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
         img_bytearray = await file.download_as_bytearray()
-        
-        # Arxa fonun silinməsi
-        clean_data = remove(bytes(img_bytearray))
-        product_img = Image.open(io.BytesIO(clean_data)).convert("RGBA")
+    
+    # Arxa fonun silinməsi (ağ fon üçün)
+product_img = Image.open(io.BytesIO(img_bytearray)).convert("RGBA")
+data = product_img.getdata()
+new_data = []
+for item in data:
+    r, g, b, a = item
+    if r > 200 and g > 200 and b > 200:
+        new_data.append((255, 255, 255, 0))
+    else:
+        new_data.append(item)
+product_img.putdata(new_data)
         
         # Boşluqların kəsilməsi (crop)
         bbox = product_img.getbbox()
