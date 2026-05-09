@@ -65,10 +65,10 @@ def remove_background(img_bytes: bytes):
 def enhance_image_quality(img):
     return ImageEnhance.Sharpness(img).enhance(1.5)
 
-# --- Dəyişdirilmiş build_catalog_image (Öncəki addımdakı) ---
 def build_catalog_image(images, texts, category, page_num):
-    # ... (Mən sizə dünən verdiyim kodun eynisi) ...
+    logger.info("build_catalog_image başladı...")
     template_path = "template.png"
+    
     if os.path.exists(template_path):
         canvas = Image.open(template_path).convert("RGB")
     else:
@@ -77,46 +77,53 @@ def build_catalog_image(images, texts, category, page_num):
 
     W, H = canvas.size
     draw = ImageDraw.Draw(canvas)
+
     try:
-        font_title = ImageFont.truetype("arial.ttf", 28) 
-        font_bullet = ImageFont.truetype("arial.ttf", 24) 
-        font_footer = ImageFont.truetype("arial.ttf", 28) 
+        font_path = "arial.ttf" 
+        font_title = ImageFont.truetype(font_path, 28) 
+        font_bullet = ImageFont.truetype(font_path, 24) 
+        font_footer = ImageFont.truetype(font_path, 28) 
     except:
         font_title = font_bullet = font_footer = ImageFont.load_default()
 
+    # Başlıq və Səhifə nömrəsi
     title_w = draw.textlength(category, font=font_title)
     draw.text(((W - title_w) / 2, 10), category, fill="white", font=font_title)
     footer_text = f"səhifə {page_num}"
     footer_w = draw.textlength(footer_text, font=font_footer)
     draw.text(((W - footer_w) / 2, 955), footer_text, fill="white", font=font_footer)
 
-    num = len(images)
-    col_w = W // num 
-    img_top, img_bottom, text_top = 70, 680, 700
-    bullet = "• "
+    # --- ŞƏKİLLƏRİN NİZAMLANMASI ---
+    num_products = len(images)
+    col_width = W // num_products
+    AREA_TOP, AREA_BOTTOM = 70, 680 # Şəkil sahəsi
 
     for i, img in enumerate(images):
-        max_w, max_h = col_w - 40, (img_bottom - img_top) - 20
-        orig_w, orig_h = img.size
-        ratio = min(max_w / orig_w, max_h / orig_h)
-        new_w, new_h = int(orig_w * ratio), int(orig_h * ratio)
-        img_r = enhance_image_quality(img.resize((new_w, new_h), Image.Resampling.LANCZOS))
-        x = col_w * i + (col_w - new_w) // 2
-        y = img_top + ((img_bottom - img_top) - new_h) // 2
-        canvas.paste(img_r, (x, y), img_r)
+        # Boşluğun ölçüləri
+        max_box_w, max_box_h = col_width - 80, (AREA_BOTTOM - AREA_TOP) - 40
+        
+        # Mütənasib ölçüləndirmə (thumbnail nisbəti qoruyur)
+        img_copy = img.copy()
+        img_copy.thumbnail((max_box_w, max_box_h), Image.Resampling.LANCZOS)
+        new_w, new_h = img_copy.size
 
-    line_height = 40
+        # Mərkəzə yerləşdirmə koordinatları
+        box_x1 = col_width * i
+        paste_x = box_x1 + (col_width - new_w) // 2
+        paste_y = AREA_TOP + ((AREA_BOTTOM - AREA_TOP) - new_h) // 2
+        
+        img_r = enhance_image_quality(img_copy)
+        canvas.paste(img_r, (paste_x, paste_y), img_r)
+
+    # --- MƏTNLRİN YAZILMASI ---
+    text_top, line_height = 700, 40
     for i, text in enumerate(texts):
-        x_start, current_y = col_w * i + 40, text_top
-        lines = text.strip().split("\n")
-        for line in lines:
+        x_start = col_width * i + 40
+        current_y = text_top
+        for line in text.strip().split("\n"):
             line = line.strip()
             if not line: continue
-            if line.startswith("•"):
-                draw.text((x_start, current_y), bullet, fill=(0,0,0), font=font_bullet)
-                draw.text((x_start + 20, current_y), line[1:].strip(), fill=(0,0,0), font=font_bullet)
-            else:
-                draw.text((x_start, current_y), line, fill=(0,0,0), font=font_bullet)
+            draw.text((x_start, current_y), line, fill=(0,0,0), font=font_bullet)
             current_y += line_height
 
     output = io.BytesIO()
