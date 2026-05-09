@@ -686,32 +686,55 @@ async def handle_text(
     # AI TƏSDİQ
     # =========================
 
-    elif state == 'wait_ai_confirm':
+  elif state == 'wait_ai_confirm':
 
-        if text == "✅ Təsdiqlə":
+    # ===================================
+    # AI TƏSDİQ
+    # ===================================
 
-            ai_text = context.user_data.get(
-                'ai_text',
-                ''
-            )
+    if text == "✅ Təsdiqlə":
 
-            context.user_data['texts'].append(
-                ai_text
-            )
+        ai_text = context.user_data.get(
+            'ai_text',
+            ''
+        )
 
-            await next_photo_or_build(
-                update,
-                context
-            )
+        context.user_data['texts'].append(
+            ai_text
+        )
 
-        elif text == "✏️ Özüm yazacağam":
+        logger.info("AI mətni təsdiqləndi")
 
-            context.user_data['state'] = 'wait_manual_text'
+        # VACİB
+        context.user_data['state'] = 'processing'
 
-            await update.message.reply_text(
-                "📝 Mətn yazın:"
-            )
+        await next_photo_or_build(
+            update,
+            context
+        )
 
+    # ===================================
+    # MANUAL MƏTN
+    # ===================================
+
+    elif text == "✏️ Özüm yazacağam":
+
+        context.user_data['state'] = 'wait_manual_text'
+
+        await update.message.reply_text(
+            "📝 Məhsul məlumatını yazın:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+    # ===================================
+    # ƏLAVƏ QORUMA
+    # ===================================
+
+    else:
+
+        await update.message.reply_text(
+            "❌ Düymələrdən istifadə edin."
+        )
     # =========================
     # MANUAL MƏTN
     # =========================
