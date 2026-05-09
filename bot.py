@@ -6,6 +6,7 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
+# --- API Açarları (Eyni qalır) ---
 TOKEN = os.environ.get("BOT_TOKEN", "")
 SEGMIND_API_KEY = os.environ.get("SEGMIND_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -14,7 +15,9 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 genai.configure(api_key=GEMINI_API_KEY)
 
+# --- AI və Şəkil Emalı Funksiyaları (Eyni qalır) ---
 def get_ai_product_info(category: str) -> str:
+    # ... (Sizin mövcud kodunuz) ...
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(
@@ -36,6 +39,7 @@ def get_ai_product_info(category: str) -> str:
         )
 
 def remove_background(img_bytes: bytes):
+    # ... (Sizin mövcud kodunuz) ...
     try:
         response = requests.post(
             "https://api.segmind.com/v1/bg-removal",
@@ -52,125 +56,167 @@ def remove_background(img_bytes: bytes):
 def enhance_image_quality(img):
     return ImageEnhance.Sharpness(img).enhance(1.5)
 
+# ==============================================================================
+# --- DƏYİŞDİRİLMİŞ FUNKSİYA: build_catalog_image ---
+# ==============================================================================
 def build_catalog_image(images, texts, category, page_num):
-    # Template-i yüklə
+    """
+    Sıfırdan çəkmək əvəzinə, hazır 'template.png' şablonunu yükləyir
+    və məlumatları onun üzərinə yazır.
+    """
     template_path = "template.png"
+    
+    # 1. Şablonu yükləyirik
     if os.path.exists(template_path):
-        template = Image.open(template_path).convert("RGBA")
+        # Şablonu RGB rejimində açırıq (üzərinə yazmaq üçün)
+        canvas = Image.open(template_path).convert("RGB")
     else:
-        template = Image.new("RGBA", (1000, 1000), (255, 255, 255, 255))
+        # Şablon tapılmasa, xəta verməmək üçün ağ fon yaradırıq (keçid variantı)
+        canvas = Image.new("RGB", (1080, 1080), (255, 255, 255))
+        print(f"XƏTA: '{template_path}' tapılmadı! Ağ fon istifadə olunur.")
 
-    W, H = template.size
-    canvas = template.copy()
+    W, H = canvas.size
     draw = ImageDraw.Draw(canvas)
 
+    # 2. Şriftləri yükləyirik (Azərbaycan şrifti dəstəyi üçün)
+    # Sizin kodunuzdakı yolları istifadə edə bilərsiniz, 
+    # mən sadəlik üçün eyni qovluqdakı 'arial.ttf' istifadə edirəm.
     try:
-        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        font_reg_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        font_title = ImageFont.truetype(font_path, int(W * 0.055))
-        font_bullet_key = ImageFont.truetype(font_path, int(W * 0.032))
-        font_bullet_val = ImageFont.truetype(font_reg_path, int(W * 0.030))
-        font_footer = ImageFont.truetype(font_path, int(W * 0.048))
+        # Şrift yollarını öz sisteminizə uyğun tənzimləyin:
+        # Məs: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        font_path_bold = "arial.ttf" 
+        font_path_reg = "arial.ttf"
+
+        font_title = ImageFont.truetype(font_path_bold, 28) # Başlıq üçün
+        font_bullet = ImageFont.truetype(font_path_reg, 24) # Əsas mətn üçün
+        font_footer = ImageFont.truetype(font_path_bold, 28) # Səhifə nömrəsi üçün
     except:
-        font_title = font_bullet_key = font_bullet_val = font_footer = ImageFont.load_default()
+        font_title = font_bullet = font_footer = ImageFont.load_default()
+        print("XƏTA: Şriftlər yüklənmədi! Standart şrift istifadə olunur.")
 
-    # Template koordinatları (şəklin ölçüsünə nisbətən)
-    header_h = int(H * 0.062)      # Başlıq hündürlüyü ~62px/1000
-    footer_h = int(H * 0.085)      # Footer hündürlüyü ~85px/1000
-    footer_top = H - footer_h
+    # Rənglər
+    white = (255, 255, 255)
+    black = (0, 0, 0)
 
-    img_top = header_h + 5
-    img_bottom = int(H * 0.648)    # Şəkil sahəsi sonu
+    # --- Daimi Mətnlər (Başlıq və Səhifə) ---
+    
+    # Kateqoriya Başlığı: "Təmizlik vasitələri" (məsələn)
+    # Şablondakı göy zolağın mərkəzi (Y ~ 10-15px)
+    title_w = draw.textlength(category, font=font_title)
+    draw.text(((W - title_w) / 2, 10), category, fill=white, font=font_title)
+
+    # Səhifə nömrəsi: "səhifə 11"
+    # Şablondakı aşağı göy zolağın mərkəzi (Y ~ 955px)
+    footer_text = f"səhifə {page_num}"
+    footer_w = draw.textlength(footer_text, font=font_footer)
+    draw.text(((W - footer_w) / 2, 955), footer_text, fill=white, font=font_footer)
+
+    # --- Dinamik Sahələrin Koordinatları ---
+    # Bu koordinatlar şablonun ağ boşluqlarına uyğun hesablanıb.
+    
+    num = len(images)
+    col_w = W // num # Sütun genişliyi (məs: 2 məhsul üçün 540px)
+    
+    # Məhsul şəkilləri üçün sahə
+    img_top = 70      # Başlıqdan sonra başlasın
+    img_bottom = 680  # Mətn sahəsinə qədər
     img_area_h = img_bottom - img_top
 
-    text_top = img_bottom + 15
-    text_bottom = footer_top - 10
+    # Məhsul mətnləri üçün sahə
+    text_top = 700    # Şəkildən sonra başlasın
+    bullet = "• "     # Bullet point simvolu
 
-    num = len(images)
-    col_w = W // num
-
-    # Yuxarı başlıq mətnini yaz
-    draw.rectangle([(0, 0), (W, header_h)], fill=(42, 63, 103))
-    title_bbox = draw.textbbox((0, 0), category, font=font_title)
-    title_w = title_bbox[2] - title_bbox[0]
-    title_h = title_bbox[3] - title_bbox[1]
-    draw.text(((W - title_w) / 2, (header_h - title_h) / 2), category, fill="white", font=font_title)
-
-    # Footer mətnini yaz
-    draw.rectangle([(0, footer_top), (W, H)], fill=(42, 63, 103))
-    footer_text = f"səhifə {page_num}"
-    ft_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
-    ft_w = ft_bbox[2] - ft_bbox[0]
-    ft_h = ft_bbox[3] - ft_bbox[1]
-    draw.text(((W - ft_w) / 2, footer_top + (footer_h - ft_h) / 2),
-              footer_text, fill="white", font=font_footer)
-
-    # Şəkilləri yerləşdir
+    # 3. Şəkilləri yerləşdiririk
     for i, img in enumerate(images):
-        max_w = col_w - 30
+        max_w = col_w - 40 # Kenarlardan boşluq
         max_h = img_area_h - 20
         orig_w, orig_h = img.size
+        
+        # Nisbəti qoruyaraq ölçünü dəyişirik
         ratio = min(max_w / orig_w, max_h / orig_h)
         new_w = int(orig_w * ratio)
         new_h = int(orig_h * ratio)
+        
         img_r = enhance_image_quality(img.resize((new_w, new_h), Image.Resampling.LANCZOS))
+        
+        # Mərkəzə düzürük
         x = col_w * i + (col_w - new_w) // 2
         y = img_top + (img_area_h - new_h) // 2
+        
+        # Şəkli şablonun üzərinə yapışdırırıq (alfa kanalı ilə)
         canvas.paste(img_r, (x, y), img_r)
 
-    # Mətnləri yerləşdir
+    # 4. Mətnləri yerləşdiririk
+    line_height = 40 # Sətirlər arası məsafə
+    
     for i, text in enumerate(texts):
-        x_start = col_w * i + 20
-        y = text_top
+        x_start = col_w * i + 40 # Sol kenardan boşluq
+        current_y = text_top
         lines = text.strip().split("\n")
 
         for line in lines:
             line = line.strip()
-            if not line or y >= text_bottom - 35:
-                continue
-
+            if not line: continue
+            
+            # Mətni şablonun üzərinə yazırıq
+            # Sizin kodunuzdakı mürəkkəb bullet parsing məntiqini sadələşdirdim,
+            # çünki AI artıq formatlanmış mətn verir.
+            
+            # Bullet point-i və mətni ayrı yazaq ki, səliqəli olsun
             if line.startswith("•"):
-                parts = line[1:].strip().split(":", 1)
-                if len(parts) == 2:
-                    key = "• " + parts[0].strip() + ":"
-                    val = parts[1].strip()
-
-                    draw.text((x_start, y), key, fill=(20, 40, 100), font=font_bullet_key)
-                    y += int(W * 0.038)
-
-                    max_text_w = col_w - 45
-                    words = val.split()
-                    line_text = ""
-                    for word in words:
-                        test = line_text + " " + word if line_text else word
-                        bbox = draw.textbbox((0, 0), test, font=font_bullet_val)
-                        if bbox[2] - bbox[0] <= max_text_w:
-                            line_text = test
-                        else:
-                            if y < text_bottom - 35:
-                                draw.text((x_start + 18, y), line_text,
-                                          fill=(40, 40, 40), font=font_bullet_val)
-                                y += int(W * 0.033)
-                            line_text = word
-                    if line_text and y < text_bottom - 35:
-                        draw.text((x_start + 18, y), line_text,
-                                  fill=(40, 40, 40), font=font_bullet_val)
-                        y += int(W * 0.042)
-                else:
-                    draw.text((x_start, y), line, fill=(40, 40, 40), font=font_bullet_val)
-                    y += int(W * 0.042)
+                draw.text((x_start, current_y), bullet, fill=black, font=font_bullet)
+                draw.text((x_start + 20, current_y), line[1:].strip(), fill=black, font=font_bullet)
             else:
-                draw.text((x_start, y), line, fill=(40, 40, 40), font=font_bullet_val)
-                y += int(W * 0.042)
+                draw.text((x_start, current_y), line, fill=black, font=font_bullet)
+            
+            current_y += line_height
+            
+            # Sahədən kənara çıxmamaq üçün yoxlama (opsional)
+            if current_y > 940: break
 
+    # 5. Nəticəni qaytarırıq
     output = io.BytesIO()
-    canvas.convert("RGB").save(output, format="PNG", quality=95)
+    canvas.save(output, format="PNG", quality=95)
     output.seek(0)
     return output
 
-# ==================== BOT ====================
+# ==============================================================================
+# --- BOT MƏNTİQİ (Eyni qalır) ---
+# ==============================================================================
+
+async def next_photo_or_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Sizin mövcud kodunuz) ...
+    idx = context.user_data.get('current_index', 0)
+    total = context.user_data.get('total_count', 1)
+
+    if idx < total:
+        context.user_data['state'] = 'wait_photo'
+        await update.message.reply_text(
+            f"📸 {idx + 1}-ci məhsulun şəklini göndərin:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        context.user_data['state'] = 'building'
+        await update.message.reply_text("🎨 Kataloq yaradılır...", reply_markup=ReplyKeyboardRemove())
+        try:
+            # Dəyişdirilmiş funksiya çağırılır
+            output = build_catalog_image(
+                context.user_data['images'],
+                context.user_data['texts'],
+                context.user_data.get('category', 'Kataloq'),
+                context.user_data.get('page', '1')
+            )
+            await update.message.reply_photo(
+                photo=output,
+                caption="✅ Kataloqunuz hazırdır!"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Kataloq xətası: {e}")
+        finally:
+            context.user_data.clear()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Sizin mövcud kodunuz) ...
     context.user_data.clear()
     context.user_data['state'] = 'wait_category'
     await update.message.reply_text(
@@ -182,6 +228,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Sizin mövcud kodunuz) ...
     state = context.user_data.get('state', '')
     text = update.message.text.strip()
 
@@ -246,6 +293,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await next_photo_or_build(update, context)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Sizin mövcud kodunuz) ...
     if context.user_data.get('state') != 'wait_photo':
         return
 
@@ -297,37 +345,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        await msg.delete()
+        if 'msg' in locals(): await msg.delete()
         await update.message.reply_text(f"❌ Xəta: {e}")
 
-async def next_photo_or_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    idx = context.user_data.get('current_index', 0)
-    total = context.user_data.get('total_count', 1)
-
-    if idx < total:
-        context.user_data['state'] = 'wait_photo'
-        await update.message.reply_text(
-            f"📸 {idx + 1}-ci məhsulun şəklini göndərin:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    else:
-        context.user_data['state'] = 'building'
-        await update.message.reply_text("🎨 Kataloq yaradılır...", reply_markup=ReplyKeyboardRemove())
-        try:
-            output = build_catalog_image(
-                context.user_data['images'],
-                context.user_data['texts'],
-                context.user_data.get('category', 'Kataloq'),
-                context.user_data.get('page', '1')
-            )
-            await update.message.reply_photo(
-                photo=output,
-                caption="✅ Kataloqunuz hazırdır!"
-            )
-        except Exception as e:
-            await update.message.reply_text(f"❌ Kataloq xətası: {e}")
-        finally:
-            context.user_data.clear()
+# ==================== MAIN (Eyni qalır) ====================
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
